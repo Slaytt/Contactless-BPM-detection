@@ -30,6 +30,9 @@ if not cap.isOpened():
     print("Error: Could not open video stream.")
     exit()
 
+#keep track of the last time the signal was updated
+last_time = time.time()
+
 signal_buffer = []
 # Use context manager to handle resource cleanup
 with FaceLandmarker.create_from_options(options) as landmarker:
@@ -37,6 +40,15 @@ with FaceLandmarker.create_from_options(options) as landmarker:
         ret, frame = cap.read()
         if not ret:
             break
+        
+        # calculate fps
+        current_time = time.time()
+        delta_time = current_time - last_time
+        last_time = current_time
+
+        if delta_time > 0: 
+            fps = 1 / delta_time
+        print(f"FPS: {fps}")
         
         frame_timestamp_ms = int(time.time() * 1000)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
