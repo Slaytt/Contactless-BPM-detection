@@ -34,6 +34,9 @@ if not cap.isOpened():
 last_time = time.time()
 
 signal_buffer = []
+
+#to store the last 30 bpm values
+bpm_history = []
 # Use context manager to handle resource cleanup
 with FaceLandmarker.create_from_options(options) as landmarker:
     while True:
@@ -73,20 +76,59 @@ with FaceLandmarker.create_from_options(options) as landmarker:
             roi = frame[y1:y2, x1:x2]
 
             if roi.size > 0:
-                    # Draw the square 
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+                mean_green = np.mean(roi[:, :, 1])
+                signal_buffer.append(mean_green)
+                
+                BUFFER_SIZE = 300
+                if len(signal_buffer) > BUFFER_SIZE:
+                    signal_buffer.pop(0)
+                
+                if len(signal_buffer) == BUFFER_SIZE:
                     
-                    mean_green = np.mean(roi[:, :, 1])
+                    raw_signal = np.array(signal_buffer)
                     
-                    # store in the list
-                    signal_buffer.append(mean_green)
-                    
-                    # limit the size of the list
-                    if len(signal_buffer) > 300:
-                        signal_buffer.pop(0)
+                    avg_fps = 30.0 
+                    if fps > 10: 
+                        avg_fps = fps
 
-                    print(f"Signal Vert: {mean_green:.2f} | Buffer: {len(signal_buffer)}")
+                    x = np.arange(len(raw_signal))
+                    p = np.polyfit(x, raw_signal, 1) 
+                    trend = np.polyval(p, x)         
+                    detrended_signal = raw_signal - trend 
+                    
+                    normalized_signal = (detrended_signal - np.mean(detrended_signal)) / (np.std(detrended_signal) + 1e-5)
+                    
+                    fft_spectrum = np.fft.rfft(normalized_signal)
+                    fft_freqs = np.fft.rfftfreq(len(normalized_signal), d=1.0/avg_fps)
+                    fft_magnitude = np.abs(fft_spectrum)
 
+                    min_bpm, max_bpm = 45.0, 200.0
+                    mask = (fft_freqs >= min_bpm/60.0) & (fft_freqs <= max_bpm/60.0)
+                    
+                    valid_freqs = fft_freqs[mask]
+                    valid_mags = fft_magnitude[mask]
+
+                    if len(valid_mags) > 0:
+                        peak_index = np.argmax(valid_mags)
+                        dominant_freq = valid_freqs[peak_index]
+                        bpm_instantane = dominant_freq * 60.0
+                        
+                        bpm_history.append(bpm_instantane)
+                        
+                        if len(bpm_history) > 30:
+                            bpm_history.pop(0)
+                            
+                        bpm_smooth = np.mean(bpm_history)
+                        
+                        text_bpm = f"BPM: {int(bpm_smooth)}"
+                        
+                        color = (0, 255, 0) if 50 < bpm_smooth < 100 else (0, 0, 255)
+                        
+                        cv2.putText(frame, text_bpm, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                        
+                        print(f"Instantané: {bpm_instantane:.1f} | Lissé: {bpm_smooth:.1f}")
         cv2.imshow("Frame", frame)
         pressedKey = cv2.waitKey(1)
         if pressedKey == ord("q"):
